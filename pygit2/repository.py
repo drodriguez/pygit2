@@ -33,7 +33,7 @@ from _pygit2 import Repository as _Repository
 from _pygit2 import GIT_BRANCH_LOCAL, GIT_BRANCH_REMOTE
 from _pygit2 import Oid, GIT_OID_HEXSZ, GIT_OID_MINPREFIXLEN
 from _pygit2 import GIT_CHECKOUT_SAFE_CREATE, GIT_DIFF_NORMAL
-from _pygit2 import Reference, Tree, Commit, Blob
+from _pygit2 import Reference, Tree, Commit, Blob, Tag
 
 
 class Repository(_Repository):
@@ -215,3 +215,75 @@ class Repository(_Repository):
             raise NotImplementedError('git_diff_blob_to_blob()')
 
         raise ValueError("Only blobs and treeish can be diffed")
+
+
+    #
+    # Push
+    #
+    def push(self, remote, *refspecs):
+        """
+        Push the given refspecs to the given remote.
+
+        The refspecs could be several things:
+        - A Reference. It will push the reference to the similarly named
+          reference in the remote.
+        - A Commit. It will push the commit to the remote. It will not update
+          any reference in the remote.
+        - A Tag. It will push the tag to the similarly named tag in the remote.
+        - A String. This will be interpreted as a refspec similar to the ones
+          used in the command line version.
+        - A 2-Tuple. The first element could be a Reference, a Commit, a Tag or
+          a String that could be interpreted by revparse_simple. The second
+          element will be always a string, intepreted as the destination
+          reference.
+        - A 3-Tuple. Same as the 2-Tuple, but the third element is a boolean
+          indicating if the destination reference allows non-fast-forwards,
+          similar to what the '+' in front of the command line version does.
+
+        The return value is a list of tuples. Each tuple represent a failed
+        push result, with the first element the failed refspec, and the second
+        element an explanatory message.
+        """
+
+        def to_str_refspec(refspec):
+            """
+            Turns any kind of recognized object into a literal refspec
+            as libgit2 understands.
+
+            See Repository.push for more information.
+            """
+            force_non_fast_forward = False
+            src = None
+            dst = None
+            if isinstance(refspec, tuple):
+                if len(refspec) < 2 or len(refspec) > 3:
+                    raise ValueError(
+                        "refspec has to be a 2- or 3-tuple, %r given" %
+                        refspec)
+                force_non_fast_forward = (len(refspec) == 3 and
+                                          refspec[2] is True)
+                src = to_str_refspec(refspec[0])
+                dst = refspec[1]
+            elif isinstance(refspec, Reference):
+                src = refspec.name
+            elif isinstance(refspec, Commit):
+                src = refspec.hex
+            elif isinstance(refspec, Tag):
+                src = refspec.name
+            elif isinstance(refspec, str):
+                src = refspec
+            else:
+                raise TypeError("cannot recognize refspec, %r given" % refspec)
+
+            ref = src
+            if force_non_fast_forward:
+                ref = "+" + ref
+            if dst:
+                ref += ":%s" % dst
+
+            return ref
+
+
+        refs = [to_str_refspec(refspec) for refspec in refspecs]
+
+        return remote.push(refs)

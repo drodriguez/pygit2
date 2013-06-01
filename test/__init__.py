@@ -45,7 +45,7 @@ def test_suite():
     # Build the list of modules
     modules = []
     for name in listdir(dirname(__file__)):
-        if name.startswith('test_') and name.endswith('.py'):
+        if name.startswith('test_push') and name.endswith('.py'):
             module = 'test.%s' % name[:-3]
             # Check the module imports correctly, have a nice error otherwise
             __import__(module)

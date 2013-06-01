@@ -234,9 +234,134 @@ Remote_save(Remote *self, PyObject *args)
 }
 
 
+int
+push_foreach_cb(const char *ref, const char *msg, void *data)
+{
+    /* This is the callback that will be called in git_push_status_foreach. It
+     * will be called for every pushed reference.
+     * data is a list PyObject.
+     */
+    PyObject *py_ref = NULL, *py_msg = NULL;
+    PyObject *tuple = NULL;
+
+    if (msg != NULL) {
+        py_ref = to_path(ref);
+        py_msg = to_encoding(msg);
+
+        if (py_ref == NULL || py_msg == NULL) {
+            Py_XDECREF(py_ref);
+            Py_XDECREF(py_msg);
+            return GIT_ERROR;
+        }
+
+        tuple = PyTuple_New(2);
+        if (tuple == NULL) {
+            Py_XDECREF(py_ref);
+            Py_XDECREF(py_msg);
+            return GIT_ERROR;
+        }
+
+        PyTuple_SET_ITEM(tuple, 0, py_ref);
+        PyTuple_SET_ITEM(tuple, 1, py_msg);
+
+        PyList_Append((PyObject *)data, tuple);
+        Py_DECREF(tuple);
+    }
+
+    return GIT_OK;
+}
+
+
+PyDoc_STRVAR(Remote_push__doc__,
+  "push([refspecs]) -> [(refspec, msg), ...]\n\n"
+  "Push the given refspecs to the this remote.\n"
+  "The result is a list of tuples, the first element of which is a "
+  "refspec that failed to push and the second element an explanatory "
+  "message.\n");
+
+PyObject *
+Remote_push(Remote *self, PyObject *args)
+{
+    PyObject *py_results = NULL;
+    PyObject *py_refspecs = NULL, *py_refspec = NULL;
+    char *c_refspec = NULL;
+    git_push *push = NULL;
+    Py_ssize_t len;
+    int err;
+
+    if (!PyArg_ParseTuple(args, "O", &py_refspecs))
+        return NULL;
+
+    py_refspecs = PySequence_Fast(py_refspecs,
+                                  "The first argument must be a sequence");
+    if (py_refspecs == NULL) {
+        return NULL;
+    }
+
+    err = git_remote_connect(self->remote, GIT_DIRECTION_PUSH);
+    if (err == GIT_OK) {
+        err = git_push_new(&push, self->remote);
+        if (err == GIT_OK) {
+            len = PySequence_Fast_GET_SIZE(py_refspecs);
+            for (Py_ssize_t idx = 0; err == GIT_OK && idx < len; idx++) {
+                py_refspec = PySequence_Fast_GET_ITEM(py_refspecs, idx);
+                if ((c_refspec = PyString_AsString(py_refspec)) != NULL) {
+                    err = git_push_add_refspec(push, c_refspec);
+                    PySys_WriteStdout("err? %d git_push_add_refspec\n", err);
+                }
+                else {
+                    PySys_WriteStdout("err PyString_AsString\n");
+                    // PyString_AsString should have set the correct TypeError,
+                    // we use GIT_EUSER, which doesn't override the exception at
+                    // the end of the method.
+                    err = GIT_EUSER;
+                }
+            }
+
+            if (err == GIT_OK) {
+                err = git_push_finish(push);
+                PySys_WriteStdout("err? %d git_push_finish\n", err);
+                const git_error *gerr = giterr_last();
+                if (gerr) PySys_WriteStdout("%s (%d)", gerr->message, gerr->klass);
+                if (err == GIT_OK && git_push_unpack_ok(push)) {
+                    py_results = PyList_New(0);
+                    PySys_WriteStdout("py_results? %p", py_results);
+                    if (py_results != NULL) {
+                        err = git_push_status_foreach(push,
+                                                      push_foreach_cb,
+                                                      py_results);
+                        PySys_WriteStdout("err? %d git_push_status_foreach", err);
+                        if (err == GIT_OK) {
+                            err = git_push_update_tips(push);
+                            PySys_WriteStdout("err? %d git_push_update_tips", err);
+                        }
+                    }
+                }
+            }
+
+            git_push_free(push);
+        }
+
+        git_remote_disconnect(self->remote);
+    }
+
+    Py_DECREF(py_refspecs);
+    if (err == GIT_EUSER) {
+        // an error happened during git_push_status_for_each, we don't want to
+        // overwrite the exception code set inside the callback.
+        return NULL;
+    } else if (err < GIT_OK) {
+        return Error_set(err);
+    } else {
+        return py_results;
+    }
+}
+
+
 PyMethodDef Remote_methods[] = {
     METHOD(Remote, fetch, METH_NOARGS),
     METHOD(Remote, save, METH_NOARGS),
+    METHOD(Remote, push, METH_VARARGS),
     {NULL}
 };
 

@@ -145,3 +145,40 @@ class DirtyRepoTestCase(RepoTestCase):
 class EmptyRepoTestCase(RepoTestCase):
 
     repo_dir = 'emptyrepo'
+
+
+class TwinReposTestCase(NoRepoTestCase):
+
+    repo_dir = 'testrepo'
+
+    def setUp(self):
+        self._temp_dir = tempfile.mkdtemp()
+        self.origin = None
+        self.clone = None
+
+        repo_dir = self.repo_dir
+        repo_path = os.path.join(os.path.dirname(__file__), 'data', repo_dir)
+        temp_repo_path = os.path.join(self._temp_dir, repo_dir)
+        temp_origin_path = os.path.join(self._temp_dir, 'origin.git')
+        temp_clone_path = os.path.join(self._temp_dir, 'clone.git')
+
+        tar = tarfile.open(repo_path + '.tar')
+        tar.extractall(self._temp_dir);
+        tar.close()
+
+        shutil.copytree(temp_repo_path, temp_origin_path)
+        shutil.copytree(temp_repo_path, temp_clone_path)
+
+        self.origin = pygit2.Repository(temp_origin_path)
+        self.clone = pygit2.Repository(temp_clone_path)
+
+        remote = self.clone.remotes[0]
+        remote.url = temp_origin_path
+        remote.save()
+        # remote.fetch()
+
+
+    def tearDown(self):
+        del self.clone
+        del self.origin
+        rmtree(self._temp_dir)
