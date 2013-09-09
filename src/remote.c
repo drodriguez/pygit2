@@ -35,6 +35,7 @@
 
 extern PyObject *GitError;
 extern PyTypeObject RepositoryType;
+extern PyTypeObject RefspecType;
 
 PyObject *
 Remote_init(Remote *self, PyObject *args, PyObject *kwds)
@@ -134,6 +135,38 @@ Remote_refspec_count__get__(Remote *self)
 
     count = git_remote_refspec_count(self->remote);
     return PyLong_FromSize_t(count);
+}
+
+
+PyDoc_STRVAR(Remote_refspecs__doc__, "Get the refspecs of a remote.");
+
+PyObject *
+Remote_refspecs__get__(Remote *self)
+{
+    size_t count;
+    PyObject *refspecsList = NULL;
+    size_t idx;
+    const git_refspec *refspec;
+    Refspec *py_refspec;
+
+    count = git_remote_refspec_count(self->remote);
+
+    refspecsList = PyList_New(count);
+    if (refspecsList == NULL)
+        return NULL;
+
+    for (idx = 0; idx < count; idx++) {
+        refspec = git_remote_get_refspec(self->remote, idx);
+
+        py_refspec = PyObject_New(Refspec, &RefspecType);
+        Py_INCREF(self);
+        py_refspec->remote = self;
+        py_refspec->refspec = refspec;
+
+        PyList_SET_ITEM(refspecsList, idx, (PyObject *)py_refspec);
+    }
+
+    return refspecsList;
 }
 
 
@@ -283,11 +316,113 @@ error:
 }
 
 
+PyDoc_STRVAR(Remote_add_fetch__doc__,
+    "add_fetch(refspec)\n"
+    "\n"
+    "Add a fetch refspec to the remote.");
+
+PyObject *
+Remote_add_fetch(Remote *self, PyObject *py_refspec)
+{
+    char *refspec = NULL;
+    int err;
+
+    refspec = py_path_to_c_str(py_refspec);
+    if (refspec == NULL)
+        return NULL;
+
+    err = git_remote_add_fetch(self->remote, refspec);
+    if (err != 0)
+        return Error_set(err);
+
+    Py_RETURN_NONE;
+}
+
+
+PyDoc_STRVAR(Remote_add_push__doc__,
+    "add_push(refspec)\n"
+    "\n"
+    "Add a push refspec to the remote.");
+
+PyObject *
+Remote_add_push(Remote *self, PyObject *py_refspec)
+{
+    char *refspec = NULL;
+    int err;
+
+    refspec = py_path_to_c_str(py_refspec);
+    if (refspec == NULL)
+        return NULL;
+
+    err = git_remote_add_push(self->remote, refspec);
+    if (err != 0)
+        return Error_set(err);
+
+    Py_RETURN_NONE;
+}
+
+PyDoc_STRVAR(Remote_remove_refspec__doc__,
+    "remove_refspec(refspec)\n"
+    "\n"
+    "Remove a refspec (an object returned from refspecs) from the remote.");
+
+PyObject *
+Remote_remove_refspec(Remote *self, PyObject *py_refspec)
+{
+    const git_refspec *c_refspec;
+    size_t count;
+    size_t idx;
+    const git_refspec *rs;
+    int found = 0;
+    int err;
+
+    c_refspec = ((Refspec *) py_refspec)->refspec;
+    count = git_remote_refspec_count(self->remote);
+
+    for (idx = 0; !found && idx < count; idx++) {
+        rs = git_remote_get_refspec(self->remote, idx);
+
+        if (git_refspec_direction(rs) == git_refspec_direction(c_refspec)
+            && git_refspec_force(rs) == git_refspec_force(c_refspec)
+            && strcmp(git_refspec_dst(rs), git_refspec_dst(c_refspec)) == 0
+            && strcmp(git_refspec_src(rs), git_refspec_src(c_refspec)) == 0) {
+
+            found = 1;
+            err = git_remote_remove_refspec(self->remote, idx);
+            if (err != 0)
+                return Error_set(err);
+        }
+    }
+
+    if (!found)
+        return Error_set_str(GIT_ENOTFOUND, "Refspec not found");
+
+    Py_RETURN_NONE;
+}
+
+
+PyDoc_STRVAR(Remote_clear_refspecs__doc__,
+    "clear_refspecs()\n"
+    "\n"
+    "Clear the refspecs");
+
+PyObject *
+Remote_clear_refspecs(Remote *self, PyObject *arg)
+{
+    git_remote_clear_refspecs(self->remote);
+    Py_RETURN_NONE;
+}
+
+
 PyMethodDef Remote_methods[] = {
     METHOD(Remote, fetch, METH_NOARGS),
     METHOD(Remote, save, METH_NOARGS),
     METHOD(Remote, get_refspec, METH_O),
     METHOD(Remote, push, METH_VARARGS),
+    METHOD(Remote, add_fetch, METH_O),
+    METHOD(Remote, add_push, METH_O),
+    METHOD(Remote, remove_refspec, METH_O),
+    METHOD(Remote, clear_refspecs, METH_NOARGS),
     {NULL}
 };
 
@@ -295,6 +430,7 @@ PyGetSetDef Remote_getseters[] = {
     GETSET(Remote, name),
     GETSET(Remote, url),
     GETTER(Remote, refspec_count),
+    GETTER(Remote, refspecs),
     {NULL}
 };
 

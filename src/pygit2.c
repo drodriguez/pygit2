@@ -64,6 +64,7 @@ extern PyTypeObject SignatureType;
 extern PyTypeObject RemoteType;
 extern PyTypeObject NoteType;
 extern PyTypeObject NoteIterType;
+extern PyTypeObject RefspecType;
 
 
 
@@ -417,6 +418,12 @@ moduleinit(PyObject* m)
     /* Remotes */
     INIT_TYPE(RemoteType, NULL, NULL)
     ADD_TYPE(m, Remote)
+
+    /* Refspecs */
+    INIT_TYPE(RefspecType, NULL, NULL)
+    ADD_TYPE(m, Refspec)
+    ADD_CONSTANT_INT(m, GIT_DIRECTION_FETCH)
+    ADD_CONSTANT_INT(m, GIT_DIRECTION_PUSH)
 
     /* Global initialization of libgit2 */
     git_threads_init();
